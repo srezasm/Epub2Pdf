@@ -4,7 +4,8 @@ import ebooklib
 from ebooklib import epub
 import argparse
 from os.path import splitext, isfile, dirname
-from os import makedirs
+from pathlib import Path
+from os import makedirs, getcwd
 from shutil import rmtree
 
 parser = argparse.ArgumentParser(description='Convert EPUB to PDF')
@@ -15,7 +16,12 @@ parser.add_argument('-o', '--output', help='output pdf file. default value: outp
                     default='./output.pdf')
 
 TMP_DIR = 'epub2pdf-tmp'
-def tmp_path(path): return f'{TMP_DIR}/{path}'
+CWD = getcwd()
+def tmp_path(path): return f'{CWD}/{TMP_DIR}/{path}'
+
+
+document_html = '<!DOCTYPE html><html><head>{header}</head><body>{{body}}</body></html>'
+stylesheet_tag = '<link rel="stylesheet" href="{href}">'
 
 
 def main(args):
@@ -25,37 +31,56 @@ def main(args):
     if not splitext(args.input)[1] == '.epub':
         raise argparse.ArgumentError(None, 'input file is not en epub')
 
+    docs = []
+    styles = []
     book = epub.read_epub(args.input)
     items = book.get_items()
+
     for item in items:
         item_name = tmp_path(item.get_name())
         make_dirs(item_name)
 
+        # styles
         if item.get_type() == ebooklib.ITEM_STYLE:
+            styles.append(stylesheet_tag.format(
+                href=tmp_path(item.get_name())))
             with open(item_name, 'w') as style_file:
                 style_file.write(item.get_content().decode("utf-8"))
 
+        # cover
         elif item.get_type() == ebooklib.ITEM_COVER:
             with open(item_name, 'wb') as cover_file:
                 cover_file.write(bytearray(item.get_content()))
 
+        # images
         elif item.get_type() == ebooklib.ITEM_IMAGE:
             with open(item_name, 'wb') as image_file:
                 image_file.write(bytearray(item.get_content()))
 
+        # fonts
         elif item.get_type() == ebooklib.ITEM_FONT:
             with open(item_name, 'wb') as font_file:
                 font_file.write(bytearray(item.get_content()))
 
-        elif item.get_type() == ebooklib.ITEM_DOCUMENT:
-            # todo: make html file with custom header
-            with open(item_name, 'w') as doc_file:
-                doc_file.write(item.get_content().decode("utf-8"))
+    # documents
+    imported_styles_html = ''.join(styles)
+    formatted_document_html = document_html.format(header=imported_styles_html)
+    items = book.get_items()
+    for doc in items:
+        if doc.get_type() != ebooklib.ITEM_DOCUMENT:
+            continue
 
-        elif item.get_type() == ebooklib.ITEM_NAVIGATION:
-            # todo: make html file with custom header
-            with open(item_name, 'w') as nav_file:
-                nav_file.write(item.get_content().decode("utf-8"))
+        doc_name = tmp_path(doc.get_name())
+        doc_name = str(Path(doc_name).with_suffix('.html'))
+        make_dirs(doc_name)
+
+        docs.append(doc_name)
+        with open(doc_name, 'w') as doc_file:
+            doc_file.write(
+                formatted_document_html.format(
+                    body=doc.get_body_content().decode("utf-8")
+                )
+            )
 
 
 def make_dirs(item_name):
